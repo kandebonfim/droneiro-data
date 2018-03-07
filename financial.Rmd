@@ -1,0 +1,44 @@
+---
+title: "Financial"
+author: "Kande Bonfim"
+date: "3/7/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+root <- "~/development/droneiro-data/"
+source(paste0(root,"setup.R"))
+```
+
+### Cleaning Dataset
+```{r}
+pagseguro$Data_Transacao <- strptime(pagseguro$Data_Transacao, format="%d/%m/%Y %H:%M:%S")
+pagseguro$Valor_Bruto <- as.numeric(pagseguro$Valor_Bruto)
+pagseguro$Valor_Liquido <- as.numeric(sub(",", ".", pagseguro$Valor_Liquido, fixed=TRUE))
+```
+
+
+```{r}
+registros <- subset(pagseguro, Tipo_Transacao == "Cobran??a")
+registros <- mutate(registros, profit = ifelse(
+  Valor_Liquido > 200, Valor_Liquido - 200 - 20, Valor_Liquido - 20
+))
+```
+
+
+```{r}
+p <- ggplot(registros, aes(Data_Transacao, Valor_Bruto)) +
+  geom_point(color=gr) +
+  facet_wrap(~as.yearmon(Data_Transacao), scales = 'free_x') +
+  theme_default
+p
+```
+
+```{r}
+revenue_by_month <- aggregate(Valor_Bruto ~ as.yearmon(Data_Transacao), registros, sum)
+profit_by_month <- aggregate(profit ~ as.yearmon(Data_Transacao), registros, sum)
+ggplot(aes(as.Date(`as.yearmon(Data_Transacao)`),abs(Valor_Bruto)), data=revenue_by_month) +
+  geom_line(color=gr) +
+  theme_default
+```
+
