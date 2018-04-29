@@ -8,10 +8,11 @@ library("ggthemes")
 library("scales")
 library("lubridate")
 library("Amelia")
-library("dplyr")
-library("plyr")
+library('plyr')
+library('dplyr')
 library("forcats")
 library("corrplot")
+library("zoo")
 
 options(OutDec= ",")
 

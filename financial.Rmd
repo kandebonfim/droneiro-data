@@ -8,21 +8,33 @@ output: html_document
 ```{r setup, include=FALSE}
 root <- "~/development/droneiro-data/"
 source(paste0(root,"setup.R"))
+pagseguro <- rbind(pagseguro, pagseguro1)
 ```
 
 ### Cleaning Dataset
 ```{r}
-pagseguro$Data_Transacao <- strptime(pagseguro$Data_Transacao, format="%d/%m/%Y %H:%M:%S")
+pagseguro$Data_Transacao <- as.POSIXct(strptime(pagseguro$Data_Transacao, format="%d/%m/%Y %H:%M:%S"))
 pagseguro$Valor_Bruto <- as.numeric(pagseguro$Valor_Bruto)
 pagseguro$Valor_Liquido <- as.numeric(sub(",", ".", pagseguro$Valor_Liquido, fixed=TRUE))
+movimentacao <- movimentacao[-nrow(movimentacao),]
+movimentacao$Data <- as.POSIXct(strptime(movimentacao$Data, format="%d/%m/%Y"))
+movimentacao$Total <- format(movimentacao$Total, decimal.mark=",")
+movimentacao$Total <- abs(as.numeric(
+    sub(",", ".", 
+      sub(".", "", movimentacao$Total, fixed=TRUE)
+    , fixed=TRUE)
+  ))
+lotes$Data <- as.POSIXct(strptime(lotes$Data, format="%d/%m/%Y"))
 ```
 
 
 ```{r}
-registros <- subset(pagseguro, Tipo_Transacao == "Cobran??a")
+registros <- subset(pagseguro, Tipo_Transacao == "Cobran??a" | Tipo_Transacao == "Pagamento")
 registros <- mutate(registros, profit = ifelse(
-  Valor_Liquido > 200, Valor_Liquido - 200 - 20, Valor_Liquido - 20
+  Valor_Liquido > 200, Valor_Liquido - 200, Valor_Liquido
 ))
+registros <- arrange(registros, as.POSIXct(Data_Transacao))
+registros$cumsum <- cumsum(registros$profit)
 ```
 
 
@@ -35,10 +47,109 @@ p
 ```
 
 ```{r}
+p <- ggplot(registros, aes(Data_Transacao, cumsum)) +
+  geom_point(color=gr, alpha=1/2) +
+  facet_wrap(~as.yearmon(Data_Transacao), scales = 'free_x') +
+  theme_default
+p
+```
+```{r}
+payments_by_day <- aggregate(Valor_Bruto ~ mday(Data_Transacao), registros, length)
+colnames(payments_by_day) <- c('day', 'clients')
+p <- ggplot(payments_by_day, aes(day, clients)) +
+  geom_col(fill=gr, alpha=1/2) +
+  scale_x_continuous(breaks = seq(0,31,1)) +
+  scale_y_continuous(breaks = seq(0,13,1)) +
+  theme_default
+p
+ggsave("plots/clients_by_day_of_month.png", width=10, height = 6, dpi=300)
+```
+
+```{r}
+lots_by_month <- aggregate(Quantidade ~ as.yearmon(Data), lotes, sum)
+n_lots_by_month <- aggregate(Quantidade ~ as.yearmon(Data), lotes, length)
 revenue_by_month <- aggregate(Valor_Bruto ~ as.yearmon(Data_Transacao), registros, sum)
 profit_by_month <- aggregate(profit ~ as.yearmon(Data_Transacao), registros, sum)
-ggplot(aes(as.Date(`as.yearmon(Data_Transacao)`),abs(Valor_Bruto)), data=revenue_by_month) +
-  geom_line(color=gr) +
-  theme_default
+clients_by_month <- aggregate(profit ~ as.yearmon(Data_Transacao), registros, length)
+profit_per_client <- aggregate(profit ~ as.yearmon(Data_Transacao), registros, mean)
+colnames(lots_by_month) <- c("as.yearmon(Data_Transacao)", "lots")
+colnames(n_lots_by_month) <- c("as.yearmon(Data_Transacao)", "n_lots")
+colnames(clients_by_month) <- c("as.yearmon(Data_Transacao)", "clients")
+colnames(profit_per_client) <- c("as.yearmon(Data_Transacao)", "avg_profit")
+
+cost_by_month <- aggregate(Total ~ as.yearmon(Data), movimentacao, sum)
+
+colnames(cost_by_month) <- c("as.yearmon(Data_Transacao)", "cost")
+adwords[1,1] = "dec 2017"
+adwords[4,1] = "feb 2018"
+adwords[5,1] = "apr 2018"
+
+colnames(adwords)[1] <- "as.yearmon(Data_Transacao)"
+adwords$`as.yearmon(Data_Transacao)` <- as.yearmon(adwords$`as.yearmon(Data_Transacao)`)
+by_month <- revenue_by_month %>%
+  left_join(profit_by_month) %>%
+  left_join(cost_by_month) %>%
+  left_join(clients_by_month) %>%
+  left_join(lots_by_month) %>%
+  left_join(n_lots_by_month) %>%
+  left_join(profit_per_client) %>%
+  left_join(adwords)
 ```
+
+```{r}
+write.csv(by_month, file=paste0(root,"excerpt.csv"))
+```
+
+```{r}
+payment_from_n <- function(n) {
+  ranges = c(35,45,55)
+  min = 0
+  if(n < ranges[1]){
+    return(min)
+  } else {
+    calc = min
+    calc = calc + (non_negative(n - ranges[1]) * 10)
+    calc = calc + (non_negative(n - ranges[2]) * 15)
+    calc = calc + (non_negative(n - ranges[3]) * 20)
+    return(calc)
+  }
+}
+
+non_negative <- function(n) {
+  if(n<0){
+    return(0)
+  } else {
+    return(n)
+  }
+}
+
+payments <- data.frame(n=seq(1,70))
+payments$sales <- sapply(payments$n, payment_from_n)
+payments$registry <- sapply(payments$n, payment_from_n)
+
+p <- ggplot(payments, aes(n, sales)) +
+  geom_point(color=gr, alpha=1/2) +
+  scale_y_continuous(breaks = seq(0,1600,100)) +
+  scale_x_continuous(breaks = seq(0,70,5)) +
+  theme_default
+p
+ggsave("plots/comission.png", width=10, height = 6, dpi=300)
+```
+
+```{r}
+by_month[is.na(by_month)] <- 0
+by_month$sales_fee <- sapply(by_month$clients, payment_from_n)
+by_month$registry_fee <- sapply(by_month$lots, payment_from_n)
+by_month$registry_fee <- with(by_month, registry_fee + (n_lots * 40))
+```
+
+```{r}
+by_month$final_profit <- with(by_month, profit - cost - registry_fee - sales_fee)
+by_month$profit_percentage <- with(by_month, final_profit / Valor_Bruto * 100)
+by_month$clients_by_conversion <- with(by_month, clients / `Convers..es` * 100)
+by_month$final_profit_per_client <- with(by_month, final_profit / clients)
+sum(by_month$final_profit)
+```
+
+
 
